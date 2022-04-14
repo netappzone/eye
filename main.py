@@ -5,27 +5,32 @@ import os
 import requests
 import zipfile
 import pandas as pd
-import logger
+import logging
 import boto3
 
 
 
 main_link = "https://registers.esma.europa.eu/solr/esma_registers_firds_files/select?q=*&fq=publication_date:%5B2021-01-17T00:00:00Z+TO+2021-01-19T23:59:59Z%5D&wt=xml&indent=true&start=0&rows=100"
 zip_results = []
+buc_name = ''
+aws_key_id = ''
+aws_access_key = ''
+r_name = ''
 
 
 def main():
-    download_xml()
+    download_xml(main_link)
     extract_zip_link('eye.xml')
     download_zip(zip_results[0])
     convert_xml('DLTINS_20210117_01of01.xml', "./")
+    upload_to_aws('DLTINS_20210117_01of01.xml', r_name, aws_key_id,aws_access_key)
 
 
-def download_xml():
+def download_xml(url):
     """
     Get file from the internet
     """
-    r = requests.get(main_link, allow_redirects=True)
+    r = requests.get(url, allow_redirects=True)
     open('eye.xml', 'wb').write(r.content)
 
 
@@ -41,7 +46,7 @@ def extract_zip_link(file):
         if element.tag == 'str' and element.attrib['name'] == 'download_link':
             key_values['str name download_link'] = element.text
             zip_results.append(element.text)
-    logger.info('zip file extracted')
+    logging.info('zip file extracted')
     return zip_results[0]
 
 
@@ -49,14 +54,14 @@ def download_zip(url):
     """
     Get file from the internet
     """
-    logger.info('Downloading Started')
+    logging.info('Downloading Started')
     r = requests.get(url, allow_redirects=True)
     # Split URL to get the file name
     filename = url.split('/')[-1]
     # Writing the file to the local file system
     with open(filename, 'wb') as output_file:
         output_file.write(r.content)
-    logger.info('Downloading Completed')
+    logging.info('Downloading Completed')
 
     # extracting the zip file contents
     with zipfile.ZipFile(BytesIO(r.content)) as zip_ref:
@@ -71,7 +76,7 @@ def convert_xml(xml_file, path):
         # Checking if the path exists or not
         if not os.path.exists(path):
             # Creating the path
-            logger.info("File path created")
+            logging.info("File path created")
             os.makedirs(path)
 
         # Extracting the csv file name from xml file
@@ -80,7 +85,7 @@ def convert_xml(xml_file, path):
         # Creating csv file path
         csv_file = os.path.join(path, csv_name)
 
-        logger.info("Xml file Loading")
+        logging.info("Xml file Loading")
         xml_iter = et.iterparse(xml_file, events=("start",))
 
         csv_columns = [
@@ -98,8 +103,8 @@ def convert_xml(xml_file, path):
         # List to store the extacted data
         extracted_data = []
 
-        logger.info("Xml file...")
-        logger.info("Extracting data from xml...")
+        logging.info("Xml file...")
+        logging.info("Extracting data from xml...")
         # Traversing the xml data
         for event, element in xml_iter:
 
@@ -147,16 +152,16 @@ def convert_xml(xml_file, path):
                     # Appending the single element extracted data in the list
                     extracted_data.append(data)
 
-        logger.info("Xml file extraction completed")
+        logging.info("Xml file extraction completed")
 
         # Appending the extracted data in the data frame
         df = df.append(extracted_data, ignore_index=True)
 
-        logger.info("Using Pandas to drop empty rows")
+        logging.info("Using Pandas to drop empty rows")
         # Removes empty rows from the dataframe
         df.dropna(inplace=True)
 
-        logger.info("Creating the CSV file")
+        logging.info("Creating the CSV file")
         # Creates csv file from the dataframe
         df.to_csv(csv_file, index=False)
 
@@ -165,18 +170,11 @@ def convert_xml(xml_file, path):
 
     except Exception as e:
 
-        logger.error(f"Error occurred during extraction - {str(e)}")
+        logging.error(f"Error occurred during extraction - {str(e)}")
 
-    def upload_to_aws(
-            file, r_name, key_id, access_key, bucket_name
-    ):
+def upload_to_aws(file, r_name, key_id, access_key, bucket_name):
         """Uploading CSV file to s3 bucket
-        Param(s):
-            file (str)                  :   Path of file to upload to s3 bucket
-            region_name (str)           :   name of region s3 bucket is hosted
-            aws_access_key_id (str)     :   AWS access key
-            aws_secret_access_key (str) :   AWS secret access key
-            bucket_name (str)           :   name of the bucket
+
         Return(s):
             true  or false (bool)
         """
@@ -185,7 +183,7 @@ def convert_xml(xml_file, path):
             # Extracting the file name from the path
             filename_in_s3 = file.split(os.sep)[-1]
 
-            logger.info("Creating the S3 object")
+            logging.info("Creating the S3 object")
             # Connecting to the bucket with boto3
             s3 = boto3.resource(
                 service_name="s3",
@@ -194,16 +192,16 @@ def convert_xml(xml_file, path):
                 aws_secret_access_key=access_key,
             )
 
-            logger.info("Uploading the file to s3 bucket")
+            logging.info("Uploading the file to s3 bucket")
             # Uploading the file to the s3
             s3.Bucket(bucket_name).upload_file(Filename=file, Key=filename_in_s3)
 
-            logger.info("uploaded successfully")
+            logging.info("uploaded successfully")
 
             # returning True for successful upload
             return True
         except Exception as e:
-            logger.error(f"Error occurred during upload - {str(e)}")
+            logging.error(f"Error occurred during upload - {str(e)}")
 
 
 if __name__ == '__main__':
